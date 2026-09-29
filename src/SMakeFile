@@ -7,7 +7,7 @@
 
 OUTFILE=Emu68EDID
 
-OBJECTS=Main.o AsmFuncs.o DeviceTree.o MailBox.o EDID.o
+OBJECTS=Main.o LE32.o DumpEDID.o DecodeEDID.o
 
 all: $(OUTFILE)
 
@@ -15,4 +15,4 @@ clean:
 	@delete $(OBJECTS)
 
 $(OUTFILE): $(OBJECTS)
-	sc MATH=STANDARD LIB:amiga.lib CHKABORT NOICONS STRIPDEBUG TO $(OUTFILE) LINK $(OBJECTS)
+	sc MATH=STANDARD TO $(OUTFILE) LINK $(OBJECTS)

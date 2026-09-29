@@ -1,184 +1,129 @@
-/********************************************************************
- *
+/******************************************************************************
+ * 
  * Program:  Emu68EDID.c
- * Purpose:  EDID command for Emu68
- * Authors:  Philippe CARPENTIER
- * Target:   AmigaOS 3.x
+ * Purpose:  PiStorm/Emu68 utility to dump/decode EDID data.
+ * Target:   M68K AmigaOS 3.x, PiStorm/Emu68 1.1+
  * Compiler: SAS/C Amiga Compiler 6.59
- *
+ * Author:   Philippe CARPENTIER
+ * 
  * Usage:
- * Emu68EDID DUMP [TO=<file>]
- * Emu68EDID PARSE [FROM=<file>] [FULL]
- *
- ********************************************************************/
+ * Emu68EDID DUMP [DISPLAY=<num>] [TO=<file>]
+ * Emu68EDID PARSE [DISPLAY=<num>] [FROM=<file>] [FULL]
+ * 
+ * Examples:
+ * Emu68EDID DUMP                ; HEX output of the primary display.
+ * Emu68EDID DUMP >EDID.txt      ; HEX output of the primary display in file.
+ * Emu68EDID DUMP TO=EDID.raw    ; RAW output of the primary display in file.
+ * Emu68EDID DUMP DISPLAY=0      ; HEX output of the primary display.
+ * Emu68EDID DUMP DISPLAY=1      ; HEX output of the secondary display.
+ * Emu68EDID PARSE               ; Parse from the attached primary display.
+ * Emu68EDID PARSE FULL          ; Parse from the attached primary display, detailed.
+ * Emu68EDID PARSE FROM=EDID.raw ; Parse from the provided EDID raw file.
+ * Emu68EDID PARSE DISPLAY=0     ; Parse from the attached primary display.
+ * Emu68EDID PARSE DISPLAY=1     ; Parse from the attached secondary display.
+ * 
+ ******************************************************************************/
 
 #include <dos/dos.h>
 #include <exec/exec.h>
-#include <proto/alib.h>
+#include <resources/mailbox.h>
+
 #include <proto/dos.h>
 #include <proto/exec.h>
+#include <proto/mailbox.h>
+#include <proto/utility.h>
 
-#include "MailBox.h"
-#include "EDID.h"
+#include "Main.h"
+#include "DumpEDID.h"
+#include "DecodeEDID.h"
 
 /******************************************************************************
- *
+ * 
  * DEFINES
- *
+ * 
  ******************************************************************************/
 
-#define EDID_BLOCK_SIZE (128)
-#define EDID_BLOCK_COUNT (256)
-
-#define TEMPLATE "DUMP/S,TO/K,PARSE/S,FROM/K,FULL/S"
+#define TEMPLATE "DISPLAY/N,DUMP/S,TO/K,PARSE/S,FROM/K,FULL/S"
 
 typedef enum {
-	OPT_DUMP,
-	OPT_TO,
-	OPT_PARSE,
-	OPT_FROM,
-	OPT_FULL,
+	OPT_DISPLAY,
+	OPT_DUMP, OPT_TO,
+	OPT_PARSE, OPT_FROM, OPT_FULL,
 	OPT_COUNT
 } OPT_ARGS;
 
 /******************************************************************************
- *
+ * 
  * GLOBALS
- *
+ * 
  ******************************************************************************/
 
-UBYTE edid_data[EDID_BLOCK_SIZE * EDID_BLOCK_COUNT];
-#ifdef VERSION_STRING
-UBYTE VERSTRING[] = "\0" VERSION_STRING;
-#else
-UBYTE VERSTRING[] = "\0$VER: Emu68EDID 1.0 (3.11.2025)";
-#endif
+APTR MailboxBase = NULL;
+STATIC UBYTE * EDIDData = NULL;
+CONST_STRPTR verstring = VERSTRING;
+
 /******************************************************************************
- *
+ * 
  * EXTERNS
- *
+ * 
  ******************************************************************************/
 
 extern struct ExecBase * SysBase;
 extern struct DosLibrary * DOSBase;
+extern struct Library * UtilityBase;
 
 /******************************************************************************
- *
+ * 
  * PROTOTYPES
- *
+ * 
  ******************************************************************************/
 
-static ULONG EDID_GetData(VOID);
-static UBYTE EDID_Checksum(UBYTE * buffer, ULONG size);
-static LONG  EDID_DumpToFile(STRPTR filename, UBYTE * buffer, ULONG size);
-static VOID  EDID_DumpToStdout(UBYTE * buffer, ULONG size);
-static LONG  EDID_Dump(STRPTR filename);
-static LONG  EDID_ParseFromFile(STRPTR filename, BOOL full);
-static LONG  EDID_ParseFromHardware(BOOL full);
-static LONG  EDID_Parse(STRPTR filename, BOOL full);
+STATIC LONG EDID_DumpToFile(STRPTR filename, UBYTE * buffer, ULONG size);
+STATIC VOID EDID_DumpToStdout(UBYTE * buffer, ULONG size);
+STATIC LONG EDID_Dump(LONG display, STRPTR filename);
+
+STATIC LONG EDID_ParseFromFile(STRPTR filename, BOOL full);
+STATIC LONG EDID_ParseFromHardware(LONG display, BOOL full);
+STATIC LONG EDID_Parse(LONG display, STRPTR filename, BOOL full);
 
 /******************************************************************************
- *
- * EDID_Checksum()
- *
- ******************************************************************************/
-
-static UBYTE EDID_Checksum(UBYTE * buffer, ULONG size)
-{
-	ULONG i;
-	UBYTE sum = 0;
-
-	for (i = 0; i < size; i++)
-	{
-		sum += buffer[i];
-	}
-
-	return sum;
-}
-
-/******************************************************************************
- *
- * EDID_GetData()
- *
- ******************************************************************************/
-
-static ULONG EDID_GetData(VOID)
-{
-	UBYTE * buffer = (UBYTE *)edid_data;
-
-	if (mbox_init())
-	{
-		if (mbox_get_edid_block(0, buffer) == TRUE)
-		{
-			if (EDID_Checksum(buffer, EDID_BLOCK_SIZE) == 0)
-			{
-				UBYTE extensions = buffer[126];
-
-				buffer += EDID_BLOCK_SIZE;
-
-				if (extensions > 0 && extensions < EDID_BLOCK_COUNT)
-				{
-					ULONG block;
-
-					for (block = 0; block < extensions; block++)
-					{
-						if (mbox_get_edid_block(block + 1, buffer) == TRUE)
-						{
-							buffer += EDID_BLOCK_SIZE;
-						}
-						else
-						{
-							break;
-						}
-					}
-				}
-			}
-		}
-
-		mbox_free();
-	}
-
-	return (ULONG)(buffer - edid_data);
-}
-
-/******************************************************************************
- *
+ * 
  * EDID_DumpToFile()
- *
+ * 
  ******************************************************************************/
 
-static LONG EDID_DumpToFile(STRPTR filename, UBYTE * buffer, ULONG size)
+STATIC LONG EDID_DumpToFile(STRPTR filename, UBYTE * buffer, ULONG size)
 {
-	static BPTR file;
-	static LONG errorCode = 0;
-
+	STATIC BPTR file;
+	STATIC LONG errorCode = 0;
+	
 	if (file = Open(filename, MODE_NEWFILE))
 	{
 		if (Write(file, buffer, size) != size)
 		{
 			errorCode = IoErr();
 		}
-
+		
 		Close(file);
 	}
-
+	
 	return (errorCode);
 }
 
 /******************************************************************************
- *
+ * 
  * EDID_DumpToStdout()
- *
+ * 
  ******************************************************************************/
 
-static VOID EDID_DumpToStdout(UBYTE * buffer, ULONG size)
+STATIC VOID EDID_DumpToStdout(UBYTE * buffer, ULONG size)
 {
-	static ULONG i;
-
+	STATIC ULONG i;
+	
 	for (i = 0; i < size; i++)
 	{
 		Printf("%02lx ", buffer[i]);
-
+		
 		if ((i + 1) % 16 == 0)
 		{
 			PutStr("\n");
@@ -187,45 +132,54 @@ static VOID EDID_DumpToStdout(UBYTE * buffer, ULONG size)
 }
 
 /******************************************************************************
- *
+ * 
  * EDID_Dump()
- *
+ * 
  ******************************************************************************/
 
-static LONG EDID_Dump(STRPTR filename)
+STATIC LONG EDID_Dump(LONG display, STRPTR filename)
 {
 	ULONG edid_size = 0;
-
-	if (edid_size = EDID_GetData())
+	
+	if (display >= 0)
+	{
+		edid_size = Get_EDID_Display(display, EDIDData);
+	}
+	else
+	{
+		edid_size = Get_EDID_Primary(EDIDData);
+	}
+	
+	if (edid_size > 0)
 	{
 		if (filename != NULL)
 		{
-			return EDID_DumpToFile(filename, edid_data, edid_size);
+			return EDID_DumpToFile(filename, EDIDData, edid_size);
 		}
-
-		EDID_DumpToStdout(edid_data, edid_size);
+		
+		EDID_DumpToStdout(EDIDData, edid_size);
 	}
 	else
 	{
 		SetIoErr(ERROR_NO_MORE_ENTRIES);
 	}
-
+	
 	return (IoErr());
 }
 
 /******************************************************************************
- *
+ * 
  * EDID_ParseFromFile()
- *
+ * 
  ******************************************************************************/
 
-static LONG EDID_ParseFromFile(STRPTR filename, BOOL full)
+STATIC LONG EDID_ParseFromFile(STRPTR filename, BOOL full)
 {
 	BPTR file;
 	APTR buffer;
-	_MonitorInfo * info;
+	MonitorInfo * info;
 	struct FileInfoBlock __aligned fib;
-
+	
 	if (file = Open(filename, MODE_OLDFILE))
 	{
 		if (ExamineFH(file, &fib))
@@ -240,8 +194,12 @@ static LONG EDID_ParseFromFile(STRPTR filename, BOOL full)
 						else dump_monitor_info_short(info);
 						free_monitor_info(info);
 					}
+					else
+					{
+						PutStr("parse error\n");
+					}
 				}
-
+				
 				FreeVec(buffer);
 			}
 			else
@@ -249,26 +207,37 @@ static LONG EDID_ParseFromFile(STRPTR filename, BOOL full)
 				SetIoErr(ERROR_NO_FREE_STORE);
 			}
 		}
-
+		
 		Close(file);
 	}
-
+	
 	return (IoErr());
 }
 
 /******************************************************************************
- *
+ * 
  * EDID_ParseFromHardware()
- *
+ * 
  ******************************************************************************/
 
-static LONG EDID_ParseFromHardware(BOOL full)
+STATIC LONG EDID_ParseFromHardware(LONG display, BOOL full)
 {
-	if (EDID_GetData())
+	ULONG edid_size = 0 ;
+	
+	if (display >= 0)
 	{
-		_MonitorInfo * info;
-
-		if (info = decode_edid(edid_data))
+		edid_size = Get_EDID_Display(display, EDIDData);
+	}
+	else
+	{
+		edid_size = Get_EDID_Primary(EDIDData);
+	}
+	
+	if (edid_size > 0)
+	{
+		MonitorInfo * info;
+		
+		if (info = decode_edid(EDIDData))
 		{
 			if (full) dump_monitor_info(info);
 			else dump_monitor_info_short(info);
@@ -279,30 +248,70 @@ static LONG EDID_ParseFromHardware(BOOL full)
 	{
 		SetIoErr(ERROR_NO_MORE_ENTRIES);
 	}
-
+	
 	return (IoErr());
 }
 
 /******************************************************************************
- *
+ * 
  * EDID_Parse()
- *
+ * 
  ******************************************************************************/
 
-static LONG EDID_Parse(STRPTR filename, BOOL full)
+STATIC LONG EDID_Parse(LONG display, STRPTR filename, BOOL full)
 {
 	if (filename != NULL)
 	{
 		return EDID_ParseFromFile(filename, full);
 	}
+	
+	return EDID_ParseFromHardware(display, full);
+}
 
-	return EDID_ParseFromHardware(full);
+/******************************************************************************
+ * 
+ * InitLibs()
+ * 
+ ******************************************************************************/
+
+STATIC BOOL InitLibs(VOID)
+{
+	if ((MailboxBase = OpenResource(MAILBOXNAME)) == NULL)
+	{
+		PutStr(MAILBOXNAME " not found\n");
+		return FALSE;
+	}
+	
+	if (!(EDIDData = AllocVec(
+		EDID_BLOCK_SIZE * EDID_BLOCK_COUNT, 
+		MEMF_PUBLIC | MEMF_CLEAR)))
+	{
+		PutStr("memory allocation error\n");
+		return FALSE;
+	}
+	
+	return TRUE;
 }
 
 /******************************************************************************
  *
- * main()
+ * CleanExit()
  *
+ ******************************************************************************/
+
+STATIC VOID CleanExit(VOID)
+{
+	if (EDIDData != NULL)
+	{
+		FreeVec(EDIDData);
+		EDIDData = NULL;
+	}
+}
+
+/******************************************************************************
+ * 
+ * main()
+ * 
  ******************************************************************************/
 
 ULONG main(ULONG argc, STRPTR * argv)
@@ -311,50 +320,65 @@ ULONG main(ULONG argc, STRPTR * argv)
 	LONG errorCode = 0;
 	LONG opts[OPT_COUNT];
 	struct RDArgs * rdargs;
-
-	opts[OPT_DUMP ] = 0L;
-	opts[OPT_TO   ] = 0L;
-	opts[OPT_PARSE] = 0L;
-	opts[OPT_FROM ] = 0L;
-	opts[OPT_FULL ] = 0L;
-
+	
+	if (!InitLibs())
+	{
+		CleanExit();
+		return (RETURN_FAIL);
+	}
+	
+	opts[OPT_DUMP   ] =  0;
+	opts[OPT_DISPLAY] = -1;
+	opts[OPT_TO     ] =  0;
+	opts[OPT_PARSE  ] =  0;
+	opts[OPT_FROM   ] =  0;
+	opts[OPT_FULL   ] =  0;
+	
 	if (rdargs = (struct RDArgs *)ReadArgs(TEMPLATE, opts, NULL))
 	{
 		rc = RETURN_ERROR;
-
+		
 		if (opts[OPT_DUMP])
 		{
-			errorCode = EDID_Dump((STRPTR)opts[OPT_TO]);
+			errorCode = EDID_Dump(
+				*(LONG *)opts[OPT_DISPLAY], 
+				 (STRPTR)opts[OPT_TO]);
+			
 			rc = (errorCode == 0) ? RETURN_OK : RETURN_WARN;
 		}
 		else if (opts[OPT_PARSE])
 		{
-			errorCode = EDID_Parse((STRPTR)opts[OPT_FROM],
-				opts[OPT_FULL] ? TRUE : FALSE);
+			errorCode = EDID_Parse(
+				*(LONG *)opts[OPT_DISPLAY], 
+				 (STRPTR)opts[OPT_FROM], 
+				         opts[OPT_FULL] ? TRUE : FALSE);
+			
 			rc = (errorCode == 0) ? RETURN_OK : RETURN_WARN;
 		}
 		else
 		{
 			errorCode = ERROR_REQUIRED_ARG_MISSING;
 		}
-
+		
 		FreeArgs(rdargs);
 	}
 	else
 	{
 		errorCode = IoErr();
 	}
-
+	
 	if (errorCode)
 	{
 		PrintFault(errorCode, NULL);
 	}
-
+	
+	CleanExit();
+	
 	return (rc);
 }
 
 /******************************************************************************
- *
+ * 
  * End of file
- *
+ * 
  ******************************************************************************/

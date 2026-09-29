@@ -1,4 +1,4 @@
-# **Emu68EDID** version 1.0
+# **Emu68EDID** version 1.1
 
 ## **Description**
 
@@ -8,15 +8,19 @@ This program retrieves the [EDID](https://en.wikipedia.org/wiki/Extended_Display
 
 This allows identifies, for example, the best native preferred resolution supported by a display device (old display may not support this feature).
 
-Written by `Philippe CARPENTIER`, 2025.
+Written by `Philippe CARPENTIER`, 2025-2026.
 
 Compiled with SAS/C 6.59 for AmigaOS/M68K.
+
+Requires AmigaOS 3.x and PiStorm/Emu68 1.1 or later (uses `mailbox.resource`).
 
 Freely distributed for non-commercial purposes.
 
 ## **Arguments**
 
 ```
+DISPLAY/N: Selects the display number to query (0 = primary, 1 = secondary).
+           If omitted, the primary display is used.
 DUMP/S:    Outputs the EDID binary data in standard hexadecimal representation.
 TO/K:      Saves the EDID binary data to file (for example: TO=EDID.bin).
 PARSE/S:   Outputs the EDID decoded data, in human readable format.
@@ -27,8 +31,8 @@ FROM/K:    Outputs the EDID decoded data, from a previously saved EDID binary da
 ## **Syntax**
 
 ```
-Emu68EDID DUMP [TO=<file>]
-Emu68EDID PARSE [FROM=<file>] [FULL]
+Emu68EDID DUMP [DISPLAY=<num>] [TO=<file>]
+Emu68EDID PARSE [DISPLAY=<num>] [FROM=<file>] [FULL]
 ```
 
 ## **Example**
@@ -36,11 +40,16 @@ Emu68EDID PARSE [FROM=<file>] [FULL]
 ```
 Emu68EDID ?
 Emu68EDID DUMP
-Emu68EDID DUMP TO=RAM:EDID.bin
+Emu68EDID DUMP >EDID.txt
+Emu68EDID DUMP TO=EDID.bin
+Emu68EDID DUMP DISPLAY=0
+Emu68EDID DUMP DISPLAY=1
 Emu68EDID PARSE
 Emu68EDID PARSE FULL
-Emu68EDID PARSE FROM=RAM:EDID.bin
-Emu68EDID PARSE FROM=RAM:EDID.bin FULL
+Emu68EDID PARSE FULL DISPLAY=0
+Emu68EDID PARSE FULL DISPLAY=1
+Emu68EDID PARSE FROM=EDID.bin
+Emu68EDID PARSE FROM=EDID.bin FULL
 ```
 
 ## **Remarks**
@@ -49,15 +58,27 @@ The `EDID` data is composed of blocks of 128 bytes. The most important data are 
 Then, optionally, there can be more, those are blocks of `EDID` extensions data.
 Most of the times we get 2 blocks of 128 bytes, so a dumped file is usually 256 bytes.
 
+The `DISPLAY` argument is only meaningful on Raspberry Pi models that provide two HDMI outputs, such as the Raspberry Pi 4B (two micro-HDMI ports) or a Compute Module 4 on a carrier board that exposes both.
+Models with a single HDMI output (for example the Raspberry Pi 3, Zero 2 or 400) only offer display 0. Querying `DISPLAY=1` there, or with no second display connected, returns no EDID data.
+
 The internal `EDID` decoder used in this program is "borrowed" from the `SDL2` project [here](https://github.com/libsdl-org/SDL/blob/main/src/video/x11/edid-parse.c).
 
 The byte data obtain with the `DUMP` option can be copy/pasted alternatively into any valid Online EDID parsers, such as:
 
 > https://www.edidreader.com/
 
+> https://people.freedesktop.org/~imirkin/edid-decode/
+
 > https://hverkuil.home.xs4all.nl/edid-decode/edid-decode.html
 
 Type `EDID reader` or `EDID decoder` in any web search engine.
+
+Real `EDID` dump examples, captured from various monitors and TVs, are provided in the archive (`bin` directory, `EDID_*.dump` files).
+They are raw binary files, as produced by the `TO` option, so they can be decoded without any display attached, for example:
+
+```
+Emu68EDID PARSE FROM=EDID_SAM735A.dump FULL
+```
 
 ## **Output example**
 
